@@ -14,13 +14,13 @@ Add the latest stable release to your `mix.exs` file, along with the required de
 ```elixir
 defp deps do
   [
-    arc: "~> 0.6.0-rc3",
+    arc: "~> 0.7.0",
 
     # If using Amazon S3:
-    ex_aws: "~> 1.0.0-rc3",
-    hackney: "~> 1.5",
-    poison: "~> 2.0",
-    sweet_xml: "~> 0.5"
+    ex_aws: "~> 1.1",
+    hackney: "~> 1.6",
+    poison: "~> 3.1",
+    sweet_xml: "~> 0.6"
   ]
 end
 ```
@@ -42,6 +42,24 @@ end
 
 Then run `mix deps.get` in your shell to fetch the dependencies.
 
+### Configuration
+
+Arc expects certain properties to be configured at the application level:
+
+```elixir
+config :arc,
+  storage: Arc.Storage.S3, # or Arc.Storage.Local
+  bucket: {:system, "AWS_S3_BUCKET"}, # if using Amazon S3
+```
+
+Along with any configuration necessary for ExAws.
+
+### Storage Providers
+Arc ships with integrations for Local Storage and S3.  Alternative storage providers may be supported by the community:
+
+* **Rackspace** - https://github.com/lokalebasen/arc_rackspace
+* **Manta** - https://github.com/onyxrev/arc_manta
+
 ### Usage with Ecto
 
 Arc comes with a companion package for use with Ecto.  If you intend to use Arc with Ecto, it is highly recommended you also add the [`arc_ecto`](https://github.com/stavro/arc_ecto) dependency.  Benefits include:
@@ -57,7 +75,7 @@ This definition module contains relevant functions to determine:
   * Optional transformations of the uploaded file
   * Where to put your files (the storage directory)
   * What to name your files
-  * How to secure your files (private? Or publically accessible?)
+  * How to secure your files (private? Or publicly accessible?)
   * Default placeholders
 
 To start off, generate an attachment definition:
@@ -83,7 +101,8 @@ There are two supported use-cases of Arc currently:
 
 The upload definition file responds to `Avatar.store/1` which accepts either:
 
-  * A path to a file
+  * A path to a local file
+  * A path to a remote `http` or `https` file
   * A map with a filename and path keys (eg, a `%Plug.Upload{}`)
   * A map with a filename and binary keys (eg, `%{filename: "image.png", binary: <<255,255,255,...>>}`)
   * A two-tuple consisting of one of the above file formats as well as a scope object.
@@ -91,8 +110,11 @@ The upload definition file responds to `Avatar.store/1` which accepts either:
 Example usage as general file store:
 
 ```elixir
-# Store any accessible file path
+# Store any locally accessible file
 Avatar.store("/path/to/my/file.png") #=> {:ok, "file.png"}
+
+# Store any remotely accessible file
+Avatar.store("http://example.com/image.png") #=> {:ok, "file.png"}
 
 # Store a file directly from a `%Plug.Upload{}`
 Avatar.store(%Plug.Upload{filename: "file.png", path: "/a/b/c"}) #=> {:ok, "file.png"}
@@ -242,24 +264,20 @@ config :arc,
   :version_timeout, 15_000 # milliseconds
 ```
 
+To disable asynchronous processing, add `@async false` to your upload definition.
+
 ## Storage of files
 
 Arc currently supports Amazon S3 and local destinations for file uploads.
 
 ### Local Configuration
+
+To store your attachments locally, override the `__storage` function in your definition module to `Arc.Storage.Local`. You may wish to optionally override the storage directory as well, as outlined below.
+
 ```elixir
 defmodule Avatar do
   use Arc.Definition
-
-  @versions [:original, :thumb]
-
-  def transform(:thumb, _) do
-    {:convert, "-strip -thumbnail 100x100^ -gravity center -extent 100x100 -format png", :png}
-  end
-
-   def __storage, do: Arc.Storage.Local
-
-   def filename(version,  {file, scope}), do: "#{version}-#{file.file_name}"
+  def __storage, do: Arc.Storage.Local # Add this
 end
 ```
 
@@ -295,8 +313,6 @@ This means it will first look for the AWS standard AWS_ACCESS_KEY_ID and AWS_SEC
 
 ### Storage Directory
 
-Arc requires the specification of a storage directory path (not including the bucket name).
-
 The storage directory defaults to "uploads", but is recommended to configure based on your intended usage.  A common pattern for user profile pictures is to store each user's uploaded images in a separate subdirectory based on their primary key:
 
 ```elixir
@@ -305,7 +321,10 @@ def storage_dir(version, {file, scope}) do
 end
 ```
 
+
 > **Note**: If you are "attaching" a file to a record on creation (eg, while inserting the record at the same time), then you cannot use the model's `id` as a path component.  You must either (1) use a different storage path format, such as UUIDs, or (2) attach and update the model after an id has been given.
+
+> **Note**: The storage directory is used for both local filestorage (as the relative or absolute directory), and S3 storage, as the path name (not including the bucket).
 
 ### Access Control Permissions
 
@@ -476,7 +495,8 @@ In your application configuration, you'll need to provide an `asset_host` value:
 
 ```elixir
 config :arc,
-  asset_host: "https://d3gav2egqolk5.cloudfront.net"
+  asset_host: "https://d3gav2egqolk5.cloudfront.net", # For a value known during compilation
+  asset_host: {:system, "ASSET_HOST"} # For a value not known until runtime
 ```
 
 ### Alternate S3 configuration example

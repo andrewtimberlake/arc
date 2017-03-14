@@ -7,7 +7,7 @@ defmodule ArcTest.Actions.Store do
     use Arc.Actions.Store
     use Arc.Definition.Storage
 
-    def validate({file, _}), do: String.ends_with?(file.file_name, ".png")
+    def validate({file, _}), do: String.ends_with?(file.file_name, ".png") || String.ends_with?(file.file_name, ".ico")
     def transform(_, _), do: :noaction
     def __versions, do: [:original, :thumb]
   end
@@ -17,12 +17,12 @@ defmodule ArcTest.Actions.Store do
     use Arc.Definition.Storage
 
     def validate({file, _}), do: String.ends_with?(file.file_name, ".png")
-    def transform(_, _), do: {:cp, ""}
+    def transform(_, _), do: {:true, ""}
     def __versions, do: [:original, :thumb]
   end
 
   test "checks file existance" do
-    assert DummyDefinition.store("non-existant-file.png") == {:error, :invalid_file}
+    assert DummyDefinition.store("non-existant-file.png") == {:error, :invalid_file_path}
   end
 
   test "delegates to definition validation" do
@@ -63,12 +63,18 @@ defmodule ArcTest.Actions.Store do
     Application.put_env :arc, :version_timeout, 1
 
     catch_exit do
-      with_mock Arc.Storage.S3, [put: fn(DummyDefinition, _, {%{file_name: "image.png", path: @img}, :scope}) -> :timer.sleep(100) && :ok end] do
+      with_mock Arc.Storage.S3, [put: fn(DummyDefinition, _, {%{file_name: "image.png", path: @img}, :scope}) -> :timer.sleep(100) && {:ok, "favicon.ico"} end] do
         assert DummyDefinition.store({%{filename: "image.png", path: @img}, :scope}) == {:ok, "image.png"}
       end
     end
 
     Application.put_env :arc, :version_timeout, 15_000
+  end
+
+  test "accepts remote files" do
+    with_mock Arc.Storage.S3, [put: fn(DummyDefinition, _, {%{file_name: "favicon.ico", path: _}, nil}) -> {:ok, "favicon.ico"} end] do
+      assert DummyDefinition.store("https://www.google.com/favicon.ico") == {:ok, "favicon.ico"}
+    end
   end
 
   test "capture data during store" do

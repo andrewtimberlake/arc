@@ -1,5 +1,6 @@
 defmodule ArcTest.Storage.S3 do
   use ExUnit.Case, async: false
+
   @img "test/support/image.png"
 
   defmodule DummyDefinition do
@@ -102,14 +103,43 @@ defmodule ArcTest.Storage.S3 do
     # Application.put_env :ex_aws, :scheme, "https://"
   end
 
+  def with_env(app, key, value, fun) do
+    previous = Application.get_env(app, key, :nothing)
+
+    Application.put_env(app, key, value)
+    fun.()
+
+    case previous do
+      :nothing -> Application.delete_env(app, key)
+      _ -> Application.put_env(app, key, previous)
+    end
+  end
+
   @tag :s3
   @tag timeout: 15000
   test "virtual_host" do
-    Application.put_env :arc, :virtual_host, true
-    assert "https://#{env_bucket}.s3.amazonaws.com/arctest/uploads/image.png" == DummyDefinition.url(@img)
+    with_env :arc, :virtual_host, true, fn ->
+      assert "https://#{env_bucket()}.s3.amazonaws.com/arctest/uploads/image.png" == DummyDefinition.url(@img)
+    end
 
-    Application.put_env :arc, :virtual_host, false
-    assert "https://s3.amazonaws.com/#{env_bucket}/arctest/uploads/image.png" == DummyDefinition.url(@img)
+    with_env :arc, :virtual_host, false, fn ->
+      assert "https://s3.amazonaws.com/#{env_bucket()}/arctest/uploads/image.png" == DummyDefinition.url(@img)
+    end
+  end
+
+  @tag :s3
+  @tag timeout: 15000
+  test "custom asset_host" do
+    custom_asset_host = "https://some.cloudfront.com"
+
+    with_env :arc, :asset_host, custom_asset_host, fn ->
+      assert "#{custom_asset_host}/arctest/uploads/image.png" == DummyDefinition.url(@img)
+    end
+
+    with_env :arc, :asset_host, {:system, "ARC_ASSET_HOST"}, fn ->
+      System.put_env("ARC_ASSET_HOST", custom_asset_host)
+      assert "#{custom_asset_host}/arctest/uploads/image.png" == DummyDefinition.url(@img)
+    end
   end
 
   @tag :s3
@@ -150,7 +180,7 @@ defmodule ArcTest.Storage.S3 do
   test "delete with scope" do
     scope = %{id: 1}
     {:ok, path} = DefinitionWithScope.store({"test/support/image.png", scope})
-    assert "https://s3.amazonaws.com/#{env_bucket}/uploads/with_scopes/1/image.png" == DefinitionWithScope.url({path, scope})
+    assert "https://s3.amazonaws.com/#{env_bucket()}/uploads/with_scopes/1/image.png" == DefinitionWithScope.url({path, scope})
     assert_public(DefinitionWithScope, {path, scope})
     delete_and_assert_not_found(DefinitionWithScope, {path, scope})
   end
@@ -160,7 +190,7 @@ defmodule ArcTest.Storage.S3 do
   test "put with error" do
     Application.put_env(:arc, :bucket, "unknown-bucket")
     {:error, res} = DummyDefinition.store("test/support/image.png")
-    Application.put_env :arc, :bucket, env_bucket
+    Application.put_env :arc, :bucket, env_bucket()
     assert res
   end
 
